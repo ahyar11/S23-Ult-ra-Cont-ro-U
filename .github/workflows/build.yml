@@ -32,7 +32,7 @@ jobs:
           cmdline-tools-version: 12266719
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Accept SDK Licenses (Fix Error y/N)
+      - name: Accept SDK Licenses
         run: |
           yes | sdkmanager --licenses || true
 
@@ -40,13 +40,19 @@ jobs:
         run: |
           mkdir project
           unzip -o *.zip -d project
+          echo "=== ISI ZIP ==="
+          ls -R project | head -n 100
 
       - name: Build APK
         run: |
-          cd project
-          if [ ! -f "./gradlew" ]; then
-            cd $(find . -maxdepth 2 -name "gradlew" -exec dirname {} \; | head -n 1)
+          GRADLEW=$(find project -name "gradlew" -type f | head -n 1)
+          if [ -z "$GRADLEW" ]; then
+            echo "gradlew TIDAK KETEMU!"
+            find project -maxdepth 3 -type f | head -n 100
+            exit 1
           fi
+          echo "Ketemu gradlew di: $GRADLEW"
+          cd $(dirname "$GRADLEW")
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
