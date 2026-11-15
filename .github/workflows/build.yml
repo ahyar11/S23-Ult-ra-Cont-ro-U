@@ -1,12 +1,7 @@
-
-name: Build S23 Ultra Control APK
+name: Build S23 Anti Throttling
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '*.zip'
-      - '.github/workflows/build.yml'
 
 jobs:
   build:
@@ -14,77 +9,113 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 12266719
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
-
-      - name: Accept SDK Licenses
+      - name: Accept Licenses
+        run: yes | sdkmanager --licenses || true
+      - name: Create Project
         run: |
-          yes | sdkmanager --licenses || true
-
-      - name: Extract project
-        run: |
-          mkdir -p project
-          unzip -o *.zip -d project
-          find project -name "*.java" | head -20
-
-      - name: Patch Shizuku
-        run: |
-          cat > /tmp/patch.py << 'PYEOF'
-          import pathlib, re
-          # 1. Tambal semua .java
-          for p in pathlib.Path('project').rglob('*.java'):
-              t = p.read_text(errors='ignore')
-              orig = t
-              if 'finish();' in t:
-                  t = t.replace('finish();', '// finish removed')
-              if 'Shizuku.newProcess(command' in t:
-                  t = t.replace(
-                      'Process p = Shizuku.newProcess(command, null, null);',
-                      'Process p = null; try { java.lang.reflect.Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class); m.setAccessible(true); p = (Process) m.invoke(null, command, null, null); } catch (Exception e) { throw new RuntimeException(e); }'
-                  )
-              if 'onCreate' in t and 'Shizuku.requestPermission' not in t and 'super.onCreate(savedInstanceState);' in t:
-                  t = t.replace(
-                      'super.onCreate(savedInstanceState);',
-                      'super.onCreate(savedInstanceState); try { android.widget.Toast.makeText(this, "App jalan, cek izin...", android.widget.Toast.LENGTH_SHORT).show(); if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) { Shizuku.requestPermission(0); } } catch (Exception e) { android.widget.Toast.makeText(this, "Error Shizuku: "+e.getMessage(), android.widget.Toast.LENGTH_LONG).show(); }'
-                  )
-              if t != orig:
-                  p.write_text(t)
-                  print(f'patched java {p}')
-          # 2. Tambal AndroidManifest.xml - tambahin ShizukuProvider kalau belum ada
-          for m in pathlib.Path('project').rglob('AndroidManifest.xml'):
-              t = m.read_text(errors='ignore')
-              orig = t
-              if 'ShizukuProvider' not in t:
-                  t = re.sub(r'(<application[^>]*>)', r'\1\n        <provider android:name="rickyshizuku.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:exported="true" android:multiprocess="true" />', t, count=1)
-                  print(f'patched manifest {m}')
-              if t != orig:
-                  m.write_text(t)
-          PYEOF
-          python3 /tmp/patch.py
-
+          mkdir -p app/src/main/java/com/s23/antithrottle
+          cat > settings.gradle << 'EOF'
+          rootProject.name = "S23AntiThrottle"
+          include ':app'
+          EOF
+          cat > build.gradle << 'EOF'
+          buildscript { repositories { google(); mavenCentral() } dependencies { classpath 'com.android.tools.build:gradle:8.5.2' } }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'com.s23.antithrottle'
+            compileSdk 34
+            defaultConfig { applicationId 'com.s23.antithrottle'; minSdk 28; targetSdk 34; versionCode 1; versionName '1.0' }
+            buildTypes { debug { minifyEnabled false } }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          dependencies { implementation 'dev.rikka.shizuku:api:13.1.5' }
+          EOF
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application android:label="S23 Anti Throttling" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+              <provider android:name="rickyshizuku.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:exported="true" android:multiprocess="true" />
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/s23/antithrottle/MainActivity.java << 'EOF'
+          package com.s23.antithrottle;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.widget.*;
+          import rickyshizuku.shizuku.Shizuku;
+          import java.io.*;
+          public class MainActivity extends Activity {
+            TextView tv;
+            void runCmd(String cmd, String info){
+              tv.setText(info + "\n\nLagi proses...");
+              new Thread(() -> {
+                try {
+                  Process p = Shizuku.newProcess(new String[]{"sh","-c",cmd}, null, null);
+                  BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                  String line; StringBuilder sb = new StringBuilder();
+                  while((line=r.readLine())!=null) sb.append(line).append("\n");
+                  p.waitFor();
+                  runOnUiThread(() -> tv.setText(info + "\n\nSELESAI!\n"+sb.toString()));
+                } catch(Exception e){ runOnUiThread(() -> tv.setText("Error: "+e.getMessage())); }
+              }).start();
+            }
+            @Override protected void onCreate(Bundle b){
+              super.onCreate(b);
+              LinearLayout l = new LinearLayout(this); l.setOrientation(LinearLayout.VERTICAL); l.setPadding(40,40,40,40);
+              tv = new TextView(this); tv.setText("S23 Anti Throttling\n\nBiar gak gampang trotling pas panas.");
+              tv.setTextSize(18);
+              Button btnIzin = new Button(this); btnIzin.setText("1. IZINKAN SHIZUKU");
+              btnIzin.setOnClickListener(v -> { try{ Shizuku.requestPermission(0); } catch(Exception e){ tv.setText("Error: "+e.getMessage()); } });
+              Button btnOn = new Button(this); btnOn.setText("2. AKTIFKAN ANTI THROTTLING");
+              btnOn.setOnClickListener(v -> runCmd(
+                "pm disable-user --user 0 com.samsung.android.game.gos; " +
+                "pm disable-user --user 0 com.samsung.android.game.gametools; " +
+                "settings put global sem_enhanced_cpu_responsiveness 1; " +
+                "settings put global game_auto_temperature_control 0; " +
+                "cmd thermalservice override-status 0; " +
+                "dumpsys deviceidle disable; " +
+                "echo GOS OFF, Thermal dilonggarkan",
+                "ANTI THROTTLING ON - HP bakal lebih ngebut, lebih panas dikit itu normal."));
+              Button btnOff = new Button(this); btnOff.setText("3. MATIKAN (BALIK NORMAL)");
+              btnOff.setOnClickListener(v -> runCmd(
+                "pm enable --user 0 com.samsung.android.game.gos; " +
+                "pm enable --user 0 com.samsung.android.game.gametools; " +
+                "settings put global sem_enhanced_cpu_responsiveness 0; " +
+                "cmd thermalservice override-status 1; " +
+                "dumpsys deviceidle enable; " +
+                "echo Balik normal",
+                "BALIK NORMAL - Throttling aktif lagi."));
+              l.addView(tv); l.addView(btnIzin); l.addView(btnOn); l.addView(btnOff);
+              setContentView(l);
+              try {
+                Shizuku.addRequestPermissionResultListener((code, res) -> runOnUiThread(() -> tv.setText("Izin Shizuku: "+res+" (0 = Berhasil, silahkan pencet tombol 2)")));
+                if(Shizuku.checkSelfPermission() != 0) Shizuku.requestPermission(0);
+                else tv.setText("S23 Anti Throttling\n\nIzin sudah ada! Langsung pencet tombol 2.");
+              } catch(Exception e){ tv.setText("Error awal: "+e.getMessage()); }
+            }
+          }
+          EOF
       - name: Build APK
         run: |
-          cd project
-          gradle assembleDebug --no-daemon --console=plain --stacktrace
-
+          gradle :app:assembleDebug --no-daemon --console=plain || ./gradlew :app:assembleDebug --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: S23-Ultra-Control-APK
-          path: project/**/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: S23-Anti-Throttling-APK
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
