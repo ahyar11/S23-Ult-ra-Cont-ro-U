@@ -1,25 +1,83 @@
-python3 -c "
-import pathlib
-for p in pathlib.Path('project').rglob('*.java'):
-    t = p.read_text(errors='ignore')
-    original = t
-    # Hapus finish() yang bikin mental
-    t = t.replace('finish();', '// finish dihapus')
-    # Tambal semua onCreate yang ada
-    if 'onCreate' in t and 'Shizuku.requestPermission' not in t:
-        t = t.replace('super.onCreate(savedInstanceState);', '''super.onCreate(savedInstanceState);
-        try {
-            if (rickyshizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                rickyshizuku.Shizuku.requestPermission(0);
-            }
-        } catch (Exception e1) {
-            try {
-                if (moe.shizuku.api.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    moe.shizuku.api.Shizuku.requestPermission(0);
-                }
-            } catch (Exception e2) {}
-        }''')
-    if t != original:
-        p.write_text(t)
-        print(f'patched {p}')
-"
+
+name: Build S23 Ultra Control APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '*.zip'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 12266719
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: Accept SDK Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
+      - name: Extract project
+        run: |
+          mkdir -p project
+          unzip -o *.zip -d project
+          find project -name "*.java" | head -20
+
+      - name: Patch Shizuku
+        run: |
+          cat > /tmp/patch.py << 'PYEOF'
+          import pathlib
+          for p in pathlib.Path('project').rglob('*.java'):
+              t = p.read_text(errors='ignore')
+              orig = t
+              # hapus finish yang bikin langsung keluar
+              if 'finish();' in t:
+                  t = t.replace('finish();', '// finish removed')
+              # patch newProcess private
+              if 'Shizuku.newProcess(command' in t:
+                  t = t.replace(
+                      'Process p = Shizuku.newProcess(command, null, null);',
+                      'Process p = null; try { java.lang.reflect.Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class); m.setAccessible(true); p = (Process) m.invoke(null, command, null, null); } catch (Exception e) { throw new RuntimeException(e); }'
+                  )
+              # paksa request permission di semua onCreate
+              if 'onCreate' in t and 'Shizuku.requestPermission' not in t and 'super.onCreate(savedInstanceState);' in t:
+                  t = t.replace(
+                      'super.onCreate(savedInstanceState);',
+                      'super.onCreate(savedInstanceState); try { if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) { Shizuku.requestPermission(0); } } catch (Exception e) {}'
+                  )
+              if t != orig:
+                  p.write_text(t)
+                  print(f'patched {p}')
+          PYEOF
+          python3 /tmp/patch.py
+
+      - name: Build APK
+        run: |
+          cd project
+          gradle assembleDebug --no-daemon --console=plain --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: S23-Ultra-Control-APK
+          path: project/**/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
