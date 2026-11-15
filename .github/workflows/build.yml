@@ -1,3 +1,4 @@
+
 name: Build S23 Ultra Control APK
 
 on:
@@ -44,28 +45,35 @@ jobs:
       - name: Patch Shizuku
         run: |
           cat > /tmp/patch.py << 'PYEOF'
-          import pathlib
+          import pathlib, re
+          # 1. Tambal semua .java
           for p in pathlib.Path('project').rglob('*.java'):
               t = p.read_text(errors='ignore')
               orig = t
-              # hapus finish yang bikin langsung keluar
               if 'finish();' in t:
                   t = t.replace('finish();', '// finish removed')
-              # patch newProcess private
               if 'Shizuku.newProcess(command' in t:
                   t = t.replace(
                       'Process p = Shizuku.newProcess(command, null, null);',
                       'Process p = null; try { java.lang.reflect.Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class); m.setAccessible(true); p = (Process) m.invoke(null, command, null, null); } catch (Exception e) { throw new RuntimeException(e); }'
                   )
-              # paksa request permission di semua onCreate
               if 'onCreate' in t and 'Shizuku.requestPermission' not in t and 'super.onCreate(savedInstanceState);' in t:
                   t = t.replace(
                       'super.onCreate(savedInstanceState);',
-                      'super.onCreate(savedInstanceState); try { if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) { Shizuku.requestPermission(0); } } catch (Exception e) {}'
+                      'super.onCreate(savedInstanceState); try { android.widget.Toast.makeText(this, "App jalan, cek izin...", android.widget.Toast.LENGTH_SHORT).show(); if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) { Shizuku.requestPermission(0); } } catch (Exception e) { android.widget.Toast.makeText(this, "Error Shizuku: "+e.getMessage(), android.widget.Toast.LENGTH_LONG).show(); }'
                   )
               if t != orig:
                   p.write_text(t)
-                  print(f'patched {p}')
+                  print(f'patched java {p}')
+          # 2. Tambal AndroidManifest.xml - tambahin ShizukuProvider kalau belum ada
+          for m in pathlib.Path('project').rglob('AndroidManifest.xml'):
+              t = m.read_text(errors='ignore')
+              orig = t
+              if 'ShizukuProvider' not in t:
+                  t = re.sub(r'(<application[^>]*>)', r'\1\n        <provider android:name="rickyshizuku.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:exported="true" android:multiprocess="true" />', t, count=1)
+                  print(f'patched manifest {m}')
+              if t != orig:
+                  m.write_text(t)
           PYEOF
           python3 /tmp/patch.py
 
