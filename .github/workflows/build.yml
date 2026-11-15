@@ -40,21 +40,12 @@ jobs:
         run: |
           mkdir project
           unzip -o *.zip -d project
-          echo "=== ISI ZIP ==="
           ls -R project | head -n 100
 
       - name: Build APK
         run: |
-          GRADLEW=$(find project -name "gradlew" -type f | head -n 1)
-          if [ -z "$GRADLEW" ]; then
-            echo "gradlew TIDAK KETEMU!"
-            find project -maxdepth 3 -type f | head -n 100
-            exit 1
-          fi
-          echo "Ketemu gradlew di: $GRADLEW"
-          cd $(dirname "$GRADLEW")
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          cd project
+          gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
