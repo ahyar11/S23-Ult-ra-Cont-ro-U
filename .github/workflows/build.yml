@@ -14,6 +14,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -25,12 +29,13 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/s23/antithrottle
           cat > settings.gradle << 'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "S23AntiThrottle"
           include ':app'
           EOF
           cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() } dependencies { classpath 'com.android.tools.build:gradle:8.5.2' } }
-          allprojects { repositories { google(); mavenCentral() } }
+          plugins { id 'com.android.application' version '8.5.2' apply false }
           EOF
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
@@ -75,47 +80,4 @@ jobs:
                 } catch(Exception e){ runOnUiThread(() -> tv.setText("Error: "+e.getMessage())); }
               }).start();
             }
-            @Override protected void onCreate(Bundle b){
-              super.onCreate(b);
-              LinearLayout l = new LinearLayout(this); l.setOrientation(LinearLayout.VERTICAL); l.setPadding(40,40,40,40);
-              tv = new TextView(this); tv.setText("S23 Anti Throttling\n\nBiar gak gampang trotling pas panas.");
-              tv.setTextSize(18);
-              Button btnIzin = new Button(this); btnIzin.setText("1. IZINKAN SHIZUKU");
-              btnIzin.setOnClickListener(v -> { try{ Shizuku.requestPermission(0); } catch(Exception e){ tv.setText("Error: "+e.getMessage()); } });
-              Button btnOn = new Button(this); btnOn.setText("2. AKTIFKAN ANTI THROTTLING");
-              btnOn.setOnClickListener(v -> runCmd(
-                "pm disable-user --user 0 com.samsung.android.game.gos; " +
-                "pm disable-user --user 0 com.samsung.android.game.gametools; " +
-                "settings put global sem_enhanced_cpu_responsiveness 1; " +
-                "settings put global game_auto_temperature_control 0; " +
-                "cmd thermalservice override-status 0; " +
-                "dumpsys deviceidle disable; " +
-                "echo GOS OFF, Thermal dilonggarkan",
-                "ANTI THROTTLING ON - HP bakal lebih ngebut, lebih panas dikit itu normal."));
-              Button btnOff = new Button(this); btnOff.setText("3. MATIKAN (BALIK NORMAL)");
-              btnOff.setOnClickListener(v -> runCmd(
-                "pm enable --user 0 com.samsung.android.game.gos; " +
-                "pm enable --user 0 com.samsung.android.game.gametools; " +
-                "settings put global sem_enhanced_cpu_responsiveness 0; " +
-                "cmd thermalservice override-status 1; " +
-                "dumpsys deviceidle enable; " +
-                "echo Balik normal",
-                "BALIK NORMAL - Throttling aktif lagi."));
-              l.addView(tv); l.addView(btnIzin); l.addView(btnOn); l.addView(btnOff);
-              setContentView(l);
-              try {
-                Shizuku.addRequestPermissionResultListener((code, res) -> runOnUiThread(() -> tv.setText("Izin Shizuku: "+res+" (0 = Berhasil, silahkan pencet tombol 2)")));
-                if(Shizuku.checkSelfPermission() != 0) Shizuku.requestPermission(0);
-                else tv.setText("S23 Anti Throttling\n\nIzin sudah ada! Langsung pencet tombol 2.");
-              } catch(Exception e){ tv.setText("Error awal: "+e.getMessage()); }
-            }
-          }
-          EOF
-      - name: Build APK
-        run: |
-          gradle :app:assembleDebug --no-daemon --console=plain || ./gradlew :app:assembleDebug --no-daemon
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: S23-Anti-Throttling-APK
-          path: '**/app/build/outputs/apk/debug/app-debug.apk'
+            @Override protected void
