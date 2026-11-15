@@ -29,16 +29,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 34
-          build-tools: 34.0.0
           cmdline-tools-version: 12266719
-          accept-android-sdk-licenses: true
-          log-accept-android-sdk-licenses: false
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Accept SDK Licenses (Fix Error y/N)
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Extract project
         run: |
@@ -48,7 +44,6 @@ jobs:
       - name: Build APK
         run: |
           cd project
-          # Cari folder yang ada gradlew-nya (kadang ada sub-folder)
           if [ ! -f "./gradlew" ]; then
             cd $(find . -maxdepth 2 -name "gradlew" -exec dirname {} \; | head -n 1)
           fi
