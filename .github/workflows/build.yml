@@ -40,7 +40,29 @@ jobs:
         run: |
           mkdir project
           unzip -o *.zip -d project
-          ls -R project | head -n 100
+          find project -name "MainActivity.java"
+
+      - name: Patch Shizuku
+        run: |
+          python3 -c "
+          import pathlib
+          for p in pathlib.Path('project').rglob('MainActivity.java'):
+              t = p.read_text()
+              old = 'Process p = Shizuku.newProcess(command, null, null);'
+              new = '''Process p;
+          try {
+              java.lang.reflect.Method m = Shizuku.class.getDeclaredMethod(\"newProcess\", String[].class, String[].class, String.class);
+              m.setAccessible(true);
+              p = (Process) m.invoke(null, command, null, null);
+          } catch (Exception e) {
+              throw new RuntimeException(e);
+          }'''
+              if old in t:
+                  p.write_text(t.replace(old, new))
+                  print(f'patched {p}')
+              else:
+                  print(f'not found in {p}')
+          "
 
       - name: Build APK
         run: |
